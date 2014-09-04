@@ -53,7 +53,7 @@ There are also wrappers for:
 Installation
 ------------
 
-1. Install [htslib](https://github.com/samtools/htslib.git htslib) using `make install`
+1. Install [htslib](https://github.com/samtools/htslib) using `make install`
 2. pip/easy_install python [cffi](https://cffi.readthedocs.org/).
 3. run `python setup.py install` (--user) from this directory.
 
