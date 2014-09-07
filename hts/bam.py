@@ -103,20 +103,24 @@ class Alignment(object):
         """Read (query) name."""
         return ffi.string(libhts.bam_get_qname(self._b))
 
+    @qname.setter
+    def qname(self, name):
+        """Set (query) name."""
+        raise NotImplemented
+        # need to check if proposed name is longer/shorter
+        # than current and calloc self._b.data based on that!!!
+        current_name = libhts.bam_get_qname(self._b)
+
     @classmethod
     def from_sam_str(cls, sam_str, bam_hdr):
-        s = ffi.new("kstring_t *")
-        libhts.kputsn("", 0, s)
-        b = libhts.bam_init1()
-        print("OK", file=sys.stderr)
-        res = libhts.sam_parse1(s, bam_hdr, b)
-        print("OK2", file=sys.stderr)
-        assert res < 0, ("SAM parse error")
-        b2 = libhts.bam_dup1(b)
-        h2 = libhts.bam_hdr_dup(bam_hdr)
-        print(b2, h2)
+        s = ffi.new('kstring_t *', {'m': 0, 'l': 0, 's': ffi.NULL})
+        libhts.kputsn(sam_str, len(sam_str) + 1, s)
 
-        return cls(b2, h2)
+        b = libhts.bam_init1()
+        res = libhts.sam_parse1(s, bam_hdr, b)
+        assert res <= 0, ("SAM parse error", res)
+        h2 = libhts.bam_hdr_dup(bam_hdr)
+        return Alignment(b, h2)
 
     @property
     def tname(self):
@@ -145,6 +149,11 @@ class Alignment(object):
         """Left-most position of alignment."""
         return self._b.core.pos
 
+    @pos.setter
+    def pos(self, value):
+        """Set the position."""
+        self._b.core.pos = value
+
     @property
     def isize(self):
         """Insert size of alignment if applicable."""
@@ -154,6 +163,11 @@ class Alignment(object):
     def mapping_quality(self):
         """Mapping quality of alignment."""
         return self._b.core.qual
+
+    @mapping_quality.setter
+    def mapping_quality(self, value):
+        """Set the mapping quality to a new value."""
+        self._b.core.qual = value
 
     map_q = mapping_quality
 
@@ -181,14 +195,6 @@ class Alignment(object):
         r = libhts.bam_get_read_seq(self._b, kstr)
         assert r == kstr.l, (r, kstr.l)
         return ffi.string(kstr.s)
-        
-        # old way relying only on core functions
-        _lookup={1: 'A', 2: 'C', 4: 'G', 8: 'T', 15: 'N'}
-        seq = "".join(_lookup[r[(i)>>1] >> ((~(i)&1)<<2) & 0xf] \
-                for i in range(self._b.core.l_qseq))
-        #if libhts.bam_is_rev(self._b):
-        #    return seq.translate(complement)[::-1]
-        return seq
 
     @property
     def flag_str(self):
@@ -295,8 +301,8 @@ class Bam(object):
 
     >>> a.flag, a.flag_str
     (16, 'REVERSE')
-    >>> a.base_qualities
-    [56, 63, 53, 62, 64, 62, 51, 44, 58, 59, 62, 53, 63, 64, 65, 65, 63, 61, 61, 48, 60, 48, 57, 64, 64, 64, 64, 64, 62, 64, 64, 64, 64, 64, 64, 64]
+    >>> a.base_qualities[:10]
+    [56, 63, 53, 62, 64, 62, 51, 44, 58, 59]
 
     >>> a.mapping_quality # or a.map_q
     3
@@ -322,12 +328,15 @@ class Bam(object):
     # the base-quality of b is set to 0.
     >>> b = a.copy()
 
-    #>>> a.adjust_overlap_quality(b)
-    #>>> a.base_q[:10]
-    #[112, 126, 106, 124, 128, 124, 102, 88, 116, 118]
+    >>> a.adjust_overlap_quality(b)
+    >>> a.base_q[:10]
+    [112, 126, 106, 124, 128, 124, 102, 88, 116, 118]
 
-    #>>> all(bq == 0 for bq in b.base_q)
-    #True
+    >>> b.base_q[:10]
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    >>> all(bq == 0 for bq in b.base_q)
+    True
 
 Writing.
 
@@ -339,7 +348,7 @@ Writing.
     >>> cnew.seq == c.seq
     True
 
-    >>> (cnew == c, b == a)
+    >>> (cnew == c, b.qname == a.qname)
     (True, True)
 
     we can also create a new writable bam with a fasta to create the bam header:
@@ -353,8 +362,25 @@ Writing.
     >>> next(b) == a
     True
 
-    #>>> c = Alignment.from_sam_str(str(a), a._h)
-    #>>> str(c)
+
+    >>> a.pos
+    9329
+    >>> a.pos += 1
+    >>> a.pos
+    9330
+
+    >>> assert a.map_q == 3
+    >>> a.map_q += 55
+    >>> assert a.mapping_quality == 58
+
+    # string to object back to string.
+    >>> s = str(a)
+    >>> c = Alignment.from_sam_str(s, a._h)
+    >>> str(c) == s
+    True
+
+    #>>> a.qname == "HELLO"
+    #>>> assert "HELLO" in str(a)
     """
 
     def __init__(self, fname, mode="r", create_index="auto", header=None, fasta=None):
